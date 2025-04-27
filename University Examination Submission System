@@ -1,0 +1,198 @@
+#!/bin/bash
+
+# Define log and data files
+LOG_FILE="submission_log.txt"
+SUBMISSIONS_DIR="submissions"
+MAX_FILE_SIZE=5242880  # Maximum size (5MB in bytes)
+
+# Function to log operations
+log_operation() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "$LOG_FILE"
+}
+
+# Function to create submissions directory if it does not exist
+create_submissions_directory() {
+    if [ ! -d "$SUBMISSIONS_DIR" ]; then
+        mkdir "$SUBMISSIONS_DIR"
+        log_operation "Submissions directory created."
+    fi
+}
+
+# Function to validate file format and size
+validate_file() {
+    local file="$1"
+    
+    # Check if the file exists
+    if [ ! -f "$file" ]; then
+        echo "Error: The file does not exist."
+        return 1
+    fi
+
+    # Check if the file is a .pdf or .docx
+    if [[ ! "$file" =~ \.(pdf|docx)$ ]]; then
+        echo "Error: Invalid file format. Only .pdf and .docx files are accepted."
+        return 1
+    fi
+
+    # Check file size
+    local file_size=$(stat -f %z "$file")
+    if [ "$file_size" -gt "$MAX_FILE_SIZE" ]; then
+        echo "Error: File exceeds the maximum size of 5MB."
+        return 1
+    fi
+
+    return 0
+}
+
+# Function to check if the file already exists (duplicate detection)
+check_duplicate_submission() {
+    local file="$1"
+    local student_id="$2"
+    local filename=$(basename "$file")
+
+    # Check if a file with the same name already exists
+    if [ -e "$SUBMISSIONS_DIR/$filename" ]; then
+        echo "Warning: Duplicate submission detected for $filename."
+        
+        # Log the duplicate detection
+        log_operation "Duplicate submission detected for $filename (Student ID: $student_id)."
+        
+        # Compare the file content to check for similarities
+        calculate_similarity "$file" "$SUBMISSIONS_DIR/$filename"
+    else
+        return 0
+    fi
+}
+
+# Function to convert non-text files to text
+convert_to_text() {
+    local file="$1"
+    local extension="${file##*.}"
+
+    if [[ "$extension" == "pdf" ]]; then
+        pdftotext "$file" - | tr -s '[:space:]' ' '  # Convert PDF to text
+    elif [[ "$extension" == "docx" ]]; then
+        docx2txt < "$file" -  # Convert DOCX to text
+    else
+        echo "Error: Unsupported file format for text conversion."
+        return 1
+    fi
+}
+
+# Function to calculate content similarity percentage
+calculate_similarity() {
+    local new_file="$1"
+    local existing_file="$2"
+
+    # Convert both files to text
+    local new_file_text=$(convert_to_text "$new_file")
+    local existing_file_text=$(convert_to_text "$existing_file")
+
+    if [[ -z "$new_file_text" || -z "$existing_file_text" ]]; then
+        echo "Error: Issue with converting files to text for similarity check."
+        return 1
+    fi
+
+    # Compare the contents of the two text files using diff
+    local diff_result=$(diff -u <(echo "$new_file_text") <(echo "$existing_file_text") | wc -l)
+
+    # Count the number of lines in each file
+    local new_file_lines=$(echo "$new_file_text" | wc -l)
+    local existing_file_lines=$(echo "$existing_file_text" | wc -l)
+
+    # Calculate the similarity percentage based on lines
+    local total_lines=$((new_file_lines + existing_file_lines))
+    local similarity_percentage=$((100 * (total_lines - diff_result) / total_lines))
+
+    # Display the similarity percentage
+    echo "Similarity between the files: $similarity_percentage%"
+
+    # Ask the user if they want to continue with the submission
+    if (( similarity_percentage >= 90 )); then
+        read -p "The files are over 90% similar. Do you want to continue with the submission? (Y/N): " confirm_submission
+        if [[ "$confirm_submission" =~ ^[Yy]$ ]]; then
+            echo "Proceeding with the submission."
+            log_operation "Plagiarism check passed (Student ID: $student_id) for $filename with similarity $similarity_percentage%"
+            return 0
+        else
+            echo "Submission cancelled due to high similarity."
+            return 1
+        fi
+    else
+        echo "The files are sufficiently different. Proceeding with the submission."
+        return 0
+    fi
+}
+
+# Function to submit an assignment
+submit_assignment() {
+    read -p "Enter your student ID: " student_id
+    read -p "Enter the path of the file to submit: " file_path
+
+    # Validate file format and size
+    if ! validate_file "$file_path"; then
+        return
+    fi
+
+    # Check for duplicate submission and content similarity
+    if ! check_duplicate_submission "$file_path" "$student_id"; then
+        return
+    fi
+
+    # Ensure unique filenames in case of resubmission
+    local filename=$(basename "$file_path")
+    local new_filename="$SUBMISSIONS_DIR/$filename"
+    local counter=1
+    while [ -e "$new_filename" ]; do
+        new_filename="${SUBMISSIONS_DIR}/${filename%.*}_$counter.${filename##*.}"
+        counter=$((counter + 1))
+    done
+
+    # Copy the file to the submissions directory
+    cp "$file_path" "$new_filename"
+    log_operation "Assignment submitted: Student ID $student_id, Filename $filename"
+
+    echo "Assignment successfully submitted!"
+}
+
+# Function to list all submitted assignments
+list_submissions() {
+    echo -e "\nList of Submitted Assignments:"
+    echo "-------------------------------"
+    ls "$SUBMISSIONS_DIR"
+}
+
+# Function to exit with confirmation
+exit_system() {
+    read -p "Are you sure you want to exit? (Y/N): " confirm_exit
+    if [[ "$confirm_exit" =~ ^[Yy]$ ]]; then
+        echo "Goodbye!"
+        log_operation "User exited the system."
+        exit 0
+    else
+        echo "Exit cancelled."
+    fi
+}
+
+# Main menu function
+main_menu() {
+    create_submissions_directory
+
+    while true; do
+        echo -e "\n*** University Examination Submission System ***"
+        echo "1. Submit an assignment"
+        echo "2. List all submitted assignments"
+        echo "3. Exit"
+        read -p "Choose an option (1-3): " option
+
+        case $option in
+            1) submit_assignment ;;
+            2) list_submissions ;;
+            3) exit_system ;;
+            *) echo "Invalid option. Please try again." ;;
+        esac
+    done
+}
+
+# Start the main menu
+main_menu
