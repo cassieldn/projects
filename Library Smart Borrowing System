@@ -1,1 +1,157 @@
+#!/bin/bash
+
+# === Configuration ===
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
+directory="$script_dir/_Directory"
+backup_dir="$script_dir/Backup"
+log_file="$script_dir/backup_log.txt"
+max_backup_size=$((500 * 1024 * 1024)) # 500MB
+
+mkdir -p "$directory"
+mkdir -p "$backup_dir"
+
+# === Logger ===
+log_operation() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "$log_file"
+}
+
+# === List Files (Mac-friendly) ===
+list_files() {
+    echo -e "\n📂 Listing Files in: $directory"
+    echo "-----------------------------------------------------------"
+    echo "Filename                      | Size (KB)     | Last Modified"
+    echo "-----------------------------------------------------------"
+
+    find "$directory" -maxdepth 1 -type f | while read file; do
+        size=$(stat -f "%z" "$file")
+        mod_time=$(stat -f "%Sm" -t "%b %d %H:%M:%S" "$file")
+        name=$(basename "$file")
+        printf "%-30s | %-8s | %s\n" "$name" "$((size / 1024))" "$mod_time"
+    done
+}
+
+# === Move File ===
+move_file() {
+    read -p "📦 Enter the filename to move: " file
+    src="$directory/$file"
+    if [ ! -f "$src" ]; then
+        echo " Error: File does not exist!"
+        return
+    fi
+
+    read -p " Enter destination directory: " dest
+    mkdir -p "$dest"
+
+    if mv "$src" "$dest/"; then
+        echo " Moved $file to $dest"
+        log_operation "Moved $file to $dest"
+    else
+        echo " Failed to move $file"
+    fi
+}
+
+# === Rename File ===
+rename_file() {
+    read -p "✏️ Enter current filename: " old_name
+    old_path="$directory/$old_name"
+    if [ ! -f "$old_path" ]; then
+        echo " Error: File does not exist!"
+        return
+    fi
+
+    read -p " Enter new filename: " new_name
+    new_path="$directory/$new_name"
+
+    if [ -f "$new_path" ]; then
+        echo " Error: A file with that name already exists!"
+        return
+    fi
+
+    mv "$old_path" "$new_path"
+    echo "✅ Renamed $old_name to $new_name"
+    log_operation "Renamed $old_name to $new_name"
+}
+
+# === Delete File ===
+delete_file() {
+    read -p "🗑️ Enter the filename to delete: " file
+    target="$directory/$file"
+    if [ ! -f "$target" ]; then
+        echo " Error: File does not exist!"
+        return
+    fi
+
+    read -p " Are you sure you want to delete $file? (Y/N): " confirm
+    if [[ "$confirm" =~ ^[Yy]$ ]]; then
+        rm "$target"
+        echo " Deleted $file"
+        log_operation "Deleted $file"
+    else
+        echo " File deletion cancelled."
+    fi
+}
+
+# === Backup File ===
+backup_file() {
+    read -p " Enter filename to backup: " file
+    src="$directory/$file"
+
+    if [ ! -f "$src" ]; then
+        echo " Error: File does not exist!"
+        return
+    fi
+
+    timestamp=$(date '+%Y-%m-%d_%H-%M-%S')
+    dest_file="$backup_dir/${file}_$timestamp"
+
+    cp "$src" "$dest_file"
+    echo "✅ Backup created: $(basename "$dest_file")"
+    log_operation "Backed up $file to $dest_file"
+
+    # Check backup size
+    current_size=$(du -sb "$backup_dir" | cut -f1)
+    if (( current_size > max_backup_size )); then
+        echo "⚠️ Warning: Backup folder exceeds 500MB!"
+        log_operation "WARNING: Backup folder exceeds 500MB"
+    fi
+}
+
+# === Exit ===
+exit_system() {
+    read -p "❓ Are you sure you want to exit? (Y/N): " confirm
+    if [[ "$confirm" =~ ^[Yy]$ ]]; then
+        echo "👋 Goodbye!"
+        log_operation "User exited the system."
+        exit 0
+    else
+        echo "🚫 Exit cancelled."
+    fi
+}
+
+# === Main Menu ===
+main_menu() {
+    while true; do
+        echo -e "\n💻 === University File Manager ==="
+        echo "1) 📂 List files"
+        echo "2) 📦 Move a file"
+        echo "3) ✏️ Rename a file"
+        echo "4) 🗑️ Delete a file"
+        echo "5) 💾 Backup a file"
+        echo "6) 🚪 Exit"
+        read -p "Choose an option (1-6): " choice
+
+        case $choice in
+            1) list_files ;;
+            2) move_file ;;
+            3) rename_file ;;
+            4) delete_file ;;
+            5) backup_file ;;
+            6) exit_system ;;
+            *) echo "❌ Invalid option. Try again." ;;
+        esac
+    done
+}
+
+# === Start ===
+main_menu
 
