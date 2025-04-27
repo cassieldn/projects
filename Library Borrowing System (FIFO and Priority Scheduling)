@@ -1,0 +1,112 @@
+#!/bin/bash
+
+# Constants
+BOOKS=("Advanced Operating Systems" "Data Structures and Algorithms" "Introduction to Linux" "Machine Learning Basics" "Web Development Essentials")
+LOGFILE="borrow_log.txt"
+REQUESTS="pending_requests.txt"
+
+# Helper: log actions with timestamp
+log_entry() {
+    local message="$1"
+    echo "$(date '+%F %T') - $message" >> "$LOGFILE"
+}
+
+# Display all available books
+show_books() {
+    echo -e "\nAvailable Books:"
+    for index in "${!BOOKS[@]}"; do
+        if [[ -n "${BOOKS[$index]}" ]]; then
+            echo "$((index + 1)). ${BOOKS[$index]}"
+        fi
+    done
+}
+
+# Add a book request to the queue
+submit_request() {
+    read -p "Enter your Student ID: " sid
+    show_books
+    read -p "Select the book number you wish to borrow: " book_no
+    if [[ "$book_no" -ge 1 && "$book_no" -le "${#BOOKS[@]}" && -n "${BOOKS[$((book_no - 1))]}" ]]; then
+        read -p "Set request priority (1-10): " level
+        echo "$sid $book_no $level" >> "$REQUESTS"
+        echo "Request submitted for ${BOOKS[$((book_no - 1))]}"
+        log_entry "Request added: $sid requested '${BOOKS[$((book_no - 1))]}' with priority $level"
+    else
+        echo "Invalid book number or unavailable title."
+    fi
+}
+
+# FIFO: Process requests in original order
+process_fifo() {
+    echo -e "\nProcessing requests using FIFO..."
+    while IFS= read -r entry; do
+        sid=$(awk '{print $1}' <<< "$entry")
+        bid=$(awk '{print $2}' <<< "$entry")
+        prio=$(awk '{print $3}' <<< "$entry")
+        
+        if [[ -n "${BOOKS[$((bid - 1))]}" ]]; then
+            echo "Book issued to $sid: ${BOOKS[$((bid - 1))]}"
+            log_entry "Issued (FIFO): '${BOOKS[$((bid - 1))]}' to $sid (priority $prio)"
+            BOOKS[$((bid - 1))]=""
+        else
+            echo "Book already taken: Request by $sid skipped."
+        fi
+    done < "$REQUESTS"
+    > "$REQUESTS"
+}
+
+# Priority Scheduling: High-priority requests go first
+process_priority() {
+    echo -e "\nProcessing requests by priority..."
+    sort -k3,3nr "$REQUESTS" | while IFS= read -r entry; do
+        sid=$(awk '{print $1}' <<< "$entry")
+        bid=$(awk '{print $2}' <<< "$entry")
+        prio=$(awk '{print $3}' <<< "$entry")
+
+        if [[ -n "${BOOKS[$((bid - 1))]}" ]]; then
+            echo "Book issued to $sid: ${BOOKS[$((bid - 1))]}"
+            log_entry "Issued (Priority): '${BOOKS[$((bid - 1))]}' to $sid (priority $prio)"
+            BOOKS[$((bid - 1))]=""
+        else
+            echo "Book unavailable for $sid (Priority $prio)."
+        fi
+    done
+    > "$REQUESTS"
+}
+
+# Main menu loop
+main_menu() {
+    while true; do
+        echo -e "\n===== Library Borrowing System ====="
+        echo "1. View available books"
+        echo "2. Submit a book request"
+        echo "3. Process requests (FIFO)"
+        echo "4. Process requests (Priority)"
+        echo "5. Exit"
+        read -p "Select an option: " choice
+
+        case $choice in
+            1) show_books ;;
+            2) submit_request ;;
+            3) process_fifo ;;
+            4) process_priority ;;
+            5) confirm_exit ;;
+            *) echo "Invalid choice, try again." ;;
+        esac
+    done
+}
+
+# Exit function
+confirm_exit() {
+    read -p "Exit the system? (y/n): " confirm
+    if [[ "$confirm" =~ ^[Yy]$ ]]; then
+        echo "Exiting system. Goodbye."
+        log_entry "Session ended by user."
+        exit 0
+    else
+        echo "Exit cancelled."
+    fi
+}
+
+# Start program
+main_menu
